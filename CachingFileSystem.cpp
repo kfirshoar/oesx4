@@ -56,6 +56,7 @@ const std::string IOCTL = "ioctl";
 int caching_getattr(const char *path, struct stat *statbuf)
 {
     logF(GETATTR);
+    if(isLogFile(path)) { return -ENOENT;}
     int ret;
     char realPath[PATH_MAX];
     changeRootPath(realPath, path);
@@ -78,6 +79,7 @@ int caching_fgetattr(const char *path, struct stat *statbuf,
                      struct fuse_file_info *fi)
 {
     logF(GETFATTR);
+    if(isLogFile(path)) { return -ENOENT;}
     if (!strcmp(path, "/"))
     {
         return caching_getattr(path, statbuf);
@@ -99,6 +101,7 @@ int caching_fgetattr(const char *path, struct stat *statbuf,
 int caching_access(const char *path, int mask)
 {
     logF(ACCESS);
+    if(isLogFile(path)) { return -ENOENT;}
     int ret;
     char rootPath[PATH_MAX];
     changeRootPath(rootPath, path);
@@ -124,6 +127,7 @@ int caching_access(const char *path, int mask)
 int caching_open(const char *path, struct fuse_file_info *fi)
 {
     logF(OPEN);
+    if(isLogFile(path)) { return -ENOENT;}
     int ret;
     int fileDes;
     char rootPath[PATH_MAX];
@@ -160,6 +164,7 @@ int caching_read(const char *path, char *buf, size_t size,
                  off_t offset, struct fuse_file_info *fi)
 {
     logF(READ);
+    if(isLogFile(path)) { return -ENOENT;}
     int readCount = 0;
     unsigned int iCur = offset / bm->blockSize;
     while (size > 0)
@@ -254,6 +259,7 @@ int caching_read(const char *path, char *buf, size_t size,
 int caching_flush(const char *path, struct fuse_file_info *fi)
 {
     logF(FLUSH);
+    if(isLogFile(path)) { return -ENOENT;}
     return 0;
 }
 
@@ -273,7 +279,9 @@ int caching_flush(const char *path, struct fuse_file_info *fi)
  */
 int caching_release(const char *path, struct fuse_file_info *fi)
 {
+    
     logF(REALESE);
+    if(isLogFile(path)) { return -ENOENT;}
     return close(fi->fh);
 }
 
@@ -287,6 +295,7 @@ int caching_release(const char *path, struct fuse_file_info *fi)
 int caching_opendir(const char *path, struct fuse_file_info *fi)
 {
     logF(OPENDIR);
+    if(isLogFile(path)) { return -ENOENT;}
     int ret = 0;
     DIR *dir;
     char rootPath[PATH_MAX];
@@ -316,6 +325,7 @@ int caching_readdir(const char *path, void *buf,
                     off_t offset, struct fuse_file_info *fi)
 {
     logF(READDIR);
+    if(isLogFile(path)) { return -ENOENT;}
     int ret = 0;
     DIR *dir;
     struct dirent *d;
@@ -343,7 +353,8 @@ int caching_readdir(const char *path, void *buf,
 int caching_releasedir(const char *path, struct fuse_file_info *fi)
 {
     logF(RELEASEDIR);
-    closedir((DIR *) (uintptr_t) fi->fh);
+    if(isLogFile(path)) { return -ENOENT;}
+    closedir((DIR*)(uintptr_t)fi->fh);
     return 0;
 }
 
@@ -351,6 +362,7 @@ int caching_releasedir(const char *path, struct fuse_file_info *fi)
 int caching_rename(const char *path, const char *newpath)
 {
     logF(REANAME);
+    if(isLogFile(path)) { return -ENOENT;}
     char rootPath[PATH_MAX];
     char newRootPath[PATH_MAX];
     changeRootPath(rootPath, path);
@@ -486,4 +498,13 @@ int main(int argc, char *argv[])
 inline void logF(std::string s)
 {
     logFile << time() << SPACE << s << std::endl;
+}
+
+inline bool isLogFile(std::string path)
+{
+    if (path.find(LOG_FILE_STRING) == path.length() - LOG_FILE_STRING)
+    {
+    	return true;
+    }
+	return false;
 }
