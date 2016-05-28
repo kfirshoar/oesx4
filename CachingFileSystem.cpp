@@ -6,6 +6,9 @@
 
 #define FUSE_USE_VERSION 26
 
+#include <fuse.h>
+#include <string.h>
+#include <unistd.h>
 #include <stdint.h>
 #include <ctype.h>
 #include <dirent.h>
@@ -18,13 +21,16 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include "BlockData.h"
+#include "BufferManager.h"
 
 using namespace std;
 
 struct fuse_operations caching_oper;
 
-static void changeRootPath(char[], const char*);
+static void changeRootPath(char[], const char *);
 
+static BufferManager *bm;
 
 /** Get file attributes.
  *
@@ -32,12 +38,13 @@ static void changeRootPath(char[], const char*);
  * ignored.  The 'st_ino' field is ignored except if the 'use_ino'
  * mount option is given.
  */
-int caching_getattr(const char *path, struct stat *statbuf){
-	int ret;
-	char realPath[PATH_MAX];
-	changeRootPath(realPath, path);
-	ret = log_syscall("lstat", lstat(realPath, statbuf), 0);
-	return ret;
+int caching_getattr(const char *path, struct stat *statbuf)
+{
+    int ret;
+    char realPath[PATH_MAX];
+    changeRootPath(realPath, path);
+    ret = log_syscall("lstat", lstat(realPath, statbuf), 0);
+    return ret;
 }
 
 /**
@@ -53,7 +60,8 @@ int caching_getattr(const char *path, struct stat *statbuf){
  * Introduced in version 2.5
  */
 int caching_fgetattr(const char *path, struct stat *statbuf,
-					struct fuse_file_info *fi){
+                     struct fuse_file_info *fi)
+{
     if (!strcmp(path, "/"))
     {
         return caching_getattr(path, statbuf);
@@ -74,12 +82,12 @@ int caching_fgetattr(const char *path, struct stat *statbuf,
  */
 int caching_access(const char *path, int mask)
 {
-	int ret;
-	char rootPath[PATH_MAX];
-	changeRootPath(rootPath, path);
-	ret = access(rootPath, mask);
-	// check for error
-	return ret;
+    int ret;
+    char rootPath[PATH_MAX];
+    changeRootPath(rootPath, path);
+    ret = access(rootPath, mask);
+    // check for error
+    return ret;
 }
 
 
@@ -88,7 +96,7 @@ int caching_access(const char *path, int mask)
  * No creation, or truncation flags (O_CREAT, O_EXCL, O_TRUNC)
  * will be passed to open().  Open should check if the operation
  * is permitted for the given flags.  Optionally open may also
- * initialize an arbitrary filehandle (fh) in the fuse_file_info
+ * initialize an arbitrary filehandle (fh) in the fuse_file_info 
  * structure, which will be passed to all file operations.
 
  * pay attention that the max allowed path is PATH_MAX (in limits.h).
@@ -96,16 +104,17 @@ int caching_access(const char *path, int mask)
 
  * Changed in version 2.2
  */
-int caching_open(const char *path, struct fuse_file_info *fi){
+int caching_open(const char *path, struct fuse_file_info *fi)
+{
     int ret;
     int fileDes;
-	char rootPath[PATH_MAX];
-	changeRootPath(rootPath, path);
+    char rootPath[PATH_MAX];
+    changeRootPath(rootPath, path);
     fileDes = log_syscall("open", open(rootPath, fi->flags), 0);
     if (fileDes < 0)
     {
         // error
-	}
+    }
     fi->fh = fileDes;
     return ret;
 }
@@ -115,14 +124,14 @@ int caching_open(const char *path, struct fuse_file_info *fi){
  *
  * Read should return exactly the number of bytes requested except
  * on EOF or error. For example, if you receive size=100, offest=0,
- * but the size of the file is 10, you will init only the first
+ * but the size of the file is 10, you will init only the first 
    ten bytes in the buff and return the number 10.
-
-   In order to read a file from the disk,
+   
+   In order to read a file from the disk, 
    we strongly advise you to use "pread" rather than "read".
-   Pay attention, in pread the offset is valid as long it is
+   Pay attention, in pread the offset is valid as long it is 
    a multipication of the block size.
-   More specifically, pread returns 0 for negative offset
+   More specifically, pread returns 0 for negative offset 
    and an offset after the end of the file
    (as long as the the rest of the requirements are fulfiiled).
    You are suppose to preserve this behavior also in your implementation.
@@ -130,8 +139,74 @@ int caching_open(const char *path, struct fuse_file_info *fi){
  * Changed in version 2.2
  */
 int caching_read(const char *path, char *buf, size_t size,
-				off_t offset, struct fuse_file_info *fi){
-	return 0;
+                 off_t offset, struct fuse_file_info *fi)
+{
+    int readCount = 0;
+    unsigned int iCur = offset / bm->blockSize;
+    while (size > 0)
+    {
+        BlockData *bCur = bm->getBlock(path, iCur);
+        if (bCur == nullptr)
+        {
+            int readSize = std::min(bm->blockSize, size);
+            char *tmpBuf = new char[readSize];
+            int realRead = pread(fi->fh, tmpBuf, readSize, offset);
+            bCur = new BlockData(iCur, realRead, std::string(path), tmpBuf);
+            bm->insertBlock(bCur);
+        }
+        int readSize = std::min(bCur->bSize, size);
+        strncpy(buf, bCur->data, readSize);
+        readCount += readSize;
+        buf += readSize;
+        size -= readSize;
+        if (size == 0 || bCur->bSize < bm->blockSize)
+        {
+            return readCount;
+        }
+        iCur++;
+    }
+    /*
+    unsigned int iStart = offset/bm->blockSize;
+    BlockData *start = bm->getBlock(path, iStart);
+    if(start != nullptr)
+    {
+        int startRead = std::min(start->bSize - offset, size);
+        strncpy(buf, start->data + (offset % bm->blockSize), startRead);
+        readCount += startRead;
+        buf += startRead;
+        size -= startRead;
+    }
+    else
+    {
+        pread(fi->fh, buf, )
+    }
+*/
+/*
+    while(size > 0)
+    {
+        if(curIndex == offset/bm->blockSize)
+        {
+            BlockData *curB = bm->getBlock(path, curIndex);
+            if(curB != nullptr)
+            {
+                strncpy(buf, curB->data + (offset % bm->blockSize), curB->bSize - offset);
+                size -= curB->bSize;
+            }
+        }
+        BlockData *curB = bm->getBlock(path, curIndex);
+        if(curB != nullptr)
+        {
+            if(firstBlock)
+            {
+
+            }
+            strncpy(buf, curB->data + (offset % bm->blockSize), curB->bSize);
+            size -= curB->bSize;
+
+        }
+    }
+    */
+    return 0;
 }
 
 /** Possibly flush cached data
@@ -176,7 +251,8 @@ int caching_flush(const char *path, struct fuse_file_info *fi)
  *
  * Changed in version 2.2
  */
-int caching_release(const char *path, struct fuse_file_info *fi){
+int caching_release(const char *path, struct fuse_file_info *fi)
+{
     return log_syscall("close", close(fi->fh), 0);
 }
 
@@ -187,15 +263,16 @@ int caching_release(const char *path, struct fuse_file_info *fi){
  *
  * Introduced in version 2.3
  */
-int caching_opendir(const char *path, struct fuse_file_info *fi){
+int caching_opendir(const char *path, struct fuse_file_info *fi)
+{
     int ret = 0;
-    DIR* dir;
+    DIR *dir;
     char rootPath[PATH_MAX];
     changeRootPath(rootPath, path);
     dir = opendir(rootPath);
     //if (dp == NULL)
-	//retstat = log_error("bb_opendir opendir");
-    fi->fh = (intptr_t)dir;
+    //retstat = log_error("bb_opendir opendir");
+    fi->fh = (intptr_t) dir;
     return retstat;
 }
 
@@ -213,23 +290,24 @@ int caching_opendir(const char *path, struct fuse_file_info *fi){
  * Introduced in version 2.3
  */
 int caching_readdir(const char *path, void *buf,
-					fuse_fill_dir_t filler,
-					off_t offset, struct fuse_file_info *fi){
-	int ret = 0;
-	DIR* dir;
-	struct dirent* d;
-    dir = (DIR*)(uintptr_t)fi->fh;
-	d = readdir(dir);
-	if (d == 0)
-	{
+                    fuse_fill_dir_t filler,
+                    off_t offset, struct fuse_file_info *fi)
+{
+    int ret = 0;
+    DIR *dir;
+    struct dirent *d;
+    dir = (DIR *) (uintptr_t) fi->fh;
+    d = readdir(dir);
+    if (d == 0)
+    {
         //ret = log_error;
         return ret;
-	}
+    }
     do
     {
-		if (filler(buf, dir->d_name, NULL, 0) != 0)
-		{
-	        return -ENOMEM;
+        if (filler(buf, dir->d_name, NULL, 0) != 0)
+        {
+            return -ENOMEM;
         }
     } while ((d = readdir(dir)) != NULL);
     return ret;
@@ -239,18 +317,20 @@ int caching_readdir(const char *path, void *buf,
  *
  * Introduced in version 2.3
  */
-int caching_releasedir(const char *path, struct fuse_file_info *fi){
-    closedir((DIR*)(uintptr_t)fi->fh);
+int caching_releasedir(const char *path, struct fuse_file_info *fi)
+{
+    closedir((DIR *) (uintptr_t) fi->fh);
     return 0;
 }
 
 /** Rename a file */
-int caching_rename(const char *path, const char *newpath){
+int caching_rename(const char *path, const char *newpath)
+{
     char rootPath[PATH_MAX];
     char newRootPath[PATH_MAX];
     changeRootPath(rootPath, path);
     changeRootPath(newRootPath, newpath);
-	bM.renameFile(rootPath, newRootPath);
+    bM.renameFile(rootPath, newRootPath);
     return log_syscall("rename", rename(rootPath, newRootPath), 0);
 }
 
@@ -261,16 +341,17 @@ int caching_rename(const char *path, const char *newpath){
  * fuse_context to all file operations and as a parameter to the
  * destroy() method.
  *
-
-If a failure occurs in this function, do nothing (absorb the failure
-and don't report it).
-For your task, the function needs to return NULL always
+ 
+If a failure occurs in this function, do nothing (absorb the failure 
+and don't report it). 
+For your task, the function needs to return NULL always 
 (if you do something else, be sure to use the fuse_context correctly).
  * Introduced in version 2.3
  * Changed in version 2.6
  */
-void *caching_init(struct fuse_conn_info *conn){
-	return NULL;
+void *caching_init(struct fuse_conn_info *conn)
+{
+    return NULL;
 }
 
 
@@ -278,15 +359,16 @@ void *caching_init(struct fuse_conn_info *conn){
  * Clean up filesystem
  *
  * Called on filesystem exit.
-
-If a failure occurs in this function, do nothing
-(absorb the failure and don't report it).
-
+  
+If a failure occurs in this function, do nothing 
+(absorb the failure and don't report it). 
+ 
  * Introduced in version 2.3
  */
-void caching_destroy(void *userdata){
-    // need to implement
+void caching_destroy(void *userdata)
+{
 }
+
 
 /**
  * Ioctl from the FUSE sepc:
@@ -297,79 +379,76 @@ void caching_destroy(void *userdata){
  * _IOC_READ in area and if both are set in/out area.  In all
  * non-NULL cases, the area is of _IOC_SIZE(cmd) bytes.
  *
- * However, in our case, this function only needs to print
+ * However, in our case, this function only needs to print 
  cache table to the log file .
- *
+ * 
  * Introduced in version 2.8
  */
-int caching_ioctl (const char *, int cmd, void *arg,
-		struct fuse_file_info *, unsigned int flags, void *data){
-	return 0;
+int caching_ioctl(const char *, int cmd, void *arg,
+                  struct fuse_file_info *, unsigned int flags, void *data)
+{
+    return 0;
 }
 
 
-// Initialise the operations.
+// Initialise the operations. 
 // You are not supposed to change this function.
 void init_caching_oper()
 {
 
-	caching_oper.getattr = caching_getattr;
-	caching_oper.access = caching_access;
-	caching_oper.open = caching_open;
-	caching_oper.read = caching_read;
-	caching_oper.flush = caching_flush;
-	caching_oper.release = caching_release;
-	caching_oper.opendir = caching_opendir;
-	caching_oper.readdir = caching_readdir;
-	caching_oper.releasedir = caching_releasedir;
-	caching_oper.rename = caching_rename;
-	caching_oper.init = caching_init;
-	caching_oper.destroy = caching_destroy;
-	caching_oper.ioctl = caching_ioctl;
-	caching_oper.fgetattr = caching_fgetattr;
+    caching_oper.getattr = caching_getattr;
+    caching_oper.access = caching_access;
+    caching_oper.open = caching_open;
+    caching_oper.read = caching_read;
+    caching_oper.flush = caching_flush;
+    caching_oper.release = caching_release;
+    caching_oper.opendir = caching_opendir;
+    caching_oper.readdir = caching_readdir;
+    caching_oper.releasedir = caching_releasedir;
+    caching_oper.rename = caching_rename;
+    caching_oper.init = caching_init;
+    caching_oper.destroy = caching_destroy;
+    caching_oper.ioctl = caching_ioctl;
+    caching_oper.fgetattr = caching_fgetattr;
 
 
-	caching_oper.readlink = NULL;
-	caching_oper.getdir = NULL;
-	caching_oper.mknod = NULL;
-	caching_oper.mkdir = NULL;
-	caching_oper.unlink = NULL;
-	caching_oper.rmdir = NULL;
-	caching_oper.symlink = NULL;
-	caching_oper.link = NULL;
-	caching_oper.chmod = NULL;
-	caching_oper.chown = NULL;
-	caching_oper.truncate = NULL;
-	caching_oper.utime = NULL;
-	caching_oper.write = NULL;
-	caching_oper.statfs = NULL;
-	caching_oper.fsync = NULL;
-	caching_oper.setxattr = NULL;
-	caching_oper.getxattr = NULL;
-	caching_oper.listxattr = NULL;
-	caching_oper.removexattr = NULL;
-	caching_oper.fsyncdir = NULL;
-	caching_oper.create = NULL;
-	caching_oper.ftruncate = NULL;
+    caching_oper.readlink = NULL;
+    caching_oper.getdir = NULL;
+    caching_oper.mknod = NULL;
+    caching_oper.mkdir = NULL;
+    caching_oper.unlink = NULL;
+    caching_oper.rmdir = NULL;
+    caching_oper.symlink = NULL;
+    caching_oper.link = NULL;
+    caching_oper.chmod = NULL;
+    caching_oper.chown = NULL;
+    caching_oper.truncate = NULL;
+    caching_oper.utime = NULL;
+    caching_oper.write = NULL;
+    caching_oper.statfs = NULL;
+    caching_oper.fsync = NULL;
+    caching_oper.setxattr = NULL;
+    caching_oper.getxattr = NULL;
+    caching_oper.listxattr = NULL;
+    caching_oper.removexattr = NULL;
+    caching_oper.fsyncdir = NULL;
+    caching_oper.create = NULL;
+    caching_oper.ftruncate = NULL;
 }
 
 //basic main. You need to complete it.
-int main(int argc, char* argv[]){
-
-	init_caching_oper();
-	argv[1] = argv[2];
-	for (int i = 2; i< (argc - 1); i++){
-		argv[i] = NULL;
-	}
-        argv[2] = (char*) "-s";
-	argc = 3;
-
-	int fuse_stat = fuse_main(argc, argv, &caching_oper, NULL);
-	return fuse_stat;
-}
-
-static void changeRootPath(char rootPath[], char* mountPath)
+int main(int argc, char *argv[])
 {
-    strcpy(rootPath, ROOT_PATH);
-    strncat(rootPath, mountPath, PATH_MAX);
+
+    init_caching_oper();
+    argv[1] = argv[2];
+    for (int i = 2; i < (argc - 1); i++)
+    {
+        argv[i] = NULL;
+    }
+    argv[2] = (char *) "-s";
+    argc = 3;
+
+    int fuse_stat = fuse_main(argc, argv, &caching_oper, NULL);
+    return fuse_stat;
 }
