@@ -31,6 +31,21 @@ struct fuse_operations caching_oper;
 static void changeRootPath(char[], const char *);
 
 static BufferManager *bm;
+const std::string SPACE = " ";
+const std::string GETATTR = "getattr";
+const std::string FGETATTR = "fgetattr";
+const std::string ACCESS = "access";
+const std::string OPEN = "open";
+const std::string READ = "read";
+const std::string FLUSH = "flush";
+const std::string RELEASE = "release";
+const std::string OPENDIR = "opendir";
+const std::string READDIR = "readdir";
+const std::string RELEASEDIR = "releasedir";
+const std::string RENAME = "rename";
+const std::string INIT = "init";
+const std::string DESTROY = "destroy";
+const std::string IOCTL = "ioctl";
 
 /** Get file attributes.
  *
@@ -40,11 +55,11 @@ static BufferManager *bm;
  */
 int caching_getattr(const char *path, struct stat *statbuf)
 {
+    logF(GETATTR);
     int ret;
     char realPath[PATH_MAX];
     changeRootPath(realPath, path);
-    ret = log_syscall("lstat", lstat(realPath, statbuf), 0);
-    return ret;
+    return lstat(realPath, statbuf);
 }
 
 /**
@@ -62,6 +77,7 @@ int caching_getattr(const char *path, struct stat *statbuf)
 int caching_fgetattr(const char *path, struct stat *statbuf,
                      struct fuse_file_info *fi)
 {
+    logF(GETFATTR);
     if (!strcmp(path, "/"))
     {
         return caching_getattr(path, statbuf);
@@ -82,6 +98,7 @@ int caching_fgetattr(const char *path, struct stat *statbuf,
  */
 int caching_access(const char *path, int mask)
 {
+    logF(ACCESS);
     int ret;
     char rootPath[PATH_MAX];
     changeRootPath(rootPath, path);
@@ -106,11 +123,12 @@ int caching_access(const char *path, int mask)
  */
 int caching_open(const char *path, struct fuse_file_info *fi)
 {
+    logF(OPEN);
     int ret;
     int fileDes;
     char rootPath[PATH_MAX];
     changeRootPath(rootPath, path);
-    fileDes = log_syscall("open", open(rootPath, fi->flags), 0);
+    fileDes = open(rootPath, fi->flags)
     if (fileDes < 0)
     {
         // error
@@ -141,6 +159,7 @@ int caching_open(const char *path, struct fuse_file_info *fi)
 int caching_read(const char *path, char *buf, size_t size,
                  off_t offset, struct fuse_file_info *fi)
 {
+    logF(READ);
     int readCount = 0;
     unsigned int iCur = offset / bm->blockSize;
     while (size > 0)
@@ -234,6 +253,7 @@ int caching_read(const char *path, char *buf, size_t size,
  */
 int caching_flush(const char *path, struct fuse_file_info *fi)
 {
+    logF(FLUSH);
     return 0;
 }
 
@@ -253,7 +273,8 @@ int caching_flush(const char *path, struct fuse_file_info *fi)
  */
 int caching_release(const char *path, struct fuse_file_info *fi)
 {
-    return log_syscall("close", close(fi->fh), 0);
+    logF(REALESE);
+    return close(fi->fh);
 }
 
 /** Open directory
@@ -265,6 +286,7 @@ int caching_release(const char *path, struct fuse_file_info *fi)
  */
 int caching_opendir(const char *path, struct fuse_file_info *fi)
 {
+    logF(OPENDIR);
     int ret = 0;
     DIR *dir;
     char rootPath[PATH_MAX];
@@ -272,7 +294,7 @@ int caching_opendir(const char *path, struct fuse_file_info *fi)
     dir = opendir(rootPath);
     //if (dp == NULL)
     //retstat = log_error("bb_opendir opendir");
-    fi->fh = (intptr_t) dir;
+    fi->fh = (intptr_t)dir;
     return retstat;
 }
 
@@ -293,10 +315,11 @@ int caching_readdir(const char *path, void *buf,
                     fuse_fill_dir_t filler,
                     off_t offset, struct fuse_file_info *fi)
 {
+    logF(READDIR);
     int ret = 0;
     DIR *dir;
     struct dirent *d;
-    dir = (DIR *) (uintptr_t) fi->fh;
+    dir = (DIR*)(uintptr_t)fi->fh;
     d = readdir(dir);
     if (d == 0)
     {
@@ -319,6 +342,7 @@ int caching_readdir(const char *path, void *buf,
  */
 int caching_releasedir(const char *path, struct fuse_file_info *fi)
 {
+    logF(RELEASEDIR);
     closedir((DIR *) (uintptr_t) fi->fh);
     return 0;
 }
@@ -326,12 +350,13 @@ int caching_releasedir(const char *path, struct fuse_file_info *fi)
 /** Rename a file */
 int caching_rename(const char *path, const char *newpath)
 {
+    logF(REANAME);
     char rootPath[PATH_MAX];
     char newRootPath[PATH_MAX];
     changeRootPath(rootPath, path);
     changeRootPath(newRootPath, newpath);
     bM.renameFile(rootPath, newRootPath);
-    return log_syscall("rename", rename(rootPath, newRootPath), 0);
+    return rename(rootPath, newRootPath);
 }
 
 /**
@@ -351,6 +376,8 @@ For your task, the function needs to return NULL always
  */
 void *caching_init(struct fuse_conn_info *conn)
 {
+    logF(INIT);
+    // new obj 
     return NULL;
 }
 
@@ -367,6 +394,7 @@ If a failure occurs in this function, do nothing
  */
 void caching_destroy(void *userdata)
 {
+    logF(Destroy)
 }
 
 
@@ -387,6 +415,8 @@ void caching_destroy(void *userdata)
 int caching_ioctl(const char *, int cmd, void *arg,
                   struct fuse_file_info *, unsigned int flags, void *data)
 {
+    logF(IOCTL);
+    //for (auto it : bM.newData)
     return 0;
 }
 
@@ -439,7 +469,7 @@ void init_caching_oper()
 //basic main. You need to complete it.
 int main(int argc, char *argv[])
 {
-
+    
     init_caching_oper();
     argv[1] = argv[2];
     for (int i = 2; i < (argc - 1); i++)
@@ -451,4 +481,9 @@ int main(int argc, char *argv[])
 
     int fuse_stat = fuse_main(argc, argv, &caching_oper, NULL);
     return fuse_stat;
+}
+
+inline void logF(std::string s)
+{
+    logFile << time() << SPACE << s << std::endl;
 }
