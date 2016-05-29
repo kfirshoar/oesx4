@@ -514,7 +514,8 @@ inline void logF(std::string s)
 
 inline bool isLogFile(std::string path)
 {
-    if (path.find(LOG_FILE_STRING) == path.length() - LOG_FILE_STRING)
+    int index = path.find(LOG_FILE_STRING);
+    if ( index != 1 && index == path.length() - LOG_FILE_STRING)
     {
     	return true;
     }
