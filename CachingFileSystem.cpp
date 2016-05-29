@@ -406,7 +406,7 @@ If a failure occurs in this function, do nothing
  */
 void caching_destroy(void *userdata)
 {
-    logF(Destroy)
+    logF(DESTROY);
 }
 
 
@@ -428,6 +428,18 @@ int caching_ioctl(const char *, int cmd, void *arg,
                   struct fuse_file_info *, unsigned int flags, void *data)
 {
     logF(IOCTL);
+    for (auto bl : bM->newData)
+    {
+    	logFile << bl->filePath << SPACE << bIndex << SPACE << numUsed << std::endl;
+    }
+    for (auto bl : bM->midData)
+    {
+    	logFile << bl->filePath << SPACE << bIndex << SPACE << numUsed << std::endl;
+    }    
+    for (auto bl : bM->oldData)
+    {
+    	logFile << bl->filePath << SPACE << bIndex << SPACE << numUsed << std::endl;
+    }
     //for (auto it : bM.newData)
     return 0;
 }
